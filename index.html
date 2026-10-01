@@ -3236,7 +3236,7 @@ document.querySelectorAll('.overlay').forEach(o=>{
 // ══════════════════════════════════════
 //  HELPERS
 // ══════════════════════════════════════
-function fmt(n) { return Math.round(n).toLocaleString('en-IN'); }
+function fmt(n) { return Number(n).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtD(d) { try { return new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); } catch { return d; } }
 function inMonth(d) { try { const x=new Date(d),n=new Date(); return x.getMonth()===n.getMonth()&&x.getFullYear()===n.getFullYear(); } catch { return false; } }
 function esc(s) { return String(s).replace(/'/g,"\\'"); }
