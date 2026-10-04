@@ -300,9 +300,9 @@
     .acc-cc-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,rgba(255,255,255,.7),rgba(255,255,255,.4))}
     .acc-total-card{background:linear-gradient(135deg,#140d2e,#0d1a2e);border:1px solid rgba(108,99,255,.2);border-radius:20px;padding:16px 18px;margin-bottom:10px}
     .acc-total-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px}
-    .acc-total-cell{background:rgba(255,255,255,.05);border-radius:10px;padding:10px 12px;text-align:center}
+    .acc-total-cell{background:rgba(255,255,255,.05);border-radius:10px;padding:8px 6px;text-align:center;overflow:hidden}
     .acc-total-cell-lbl{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--mt);margin-bottom:4px}
-    .acc-total-cell-val{font-family:'Syne',sans-serif;font-size:14px;font-weight:800}
+    .acc-total-cell-val{font-family:'Syne',sans-serif;font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.3px}
     /* trf type tog */
     .tg.trf{background:linear-gradient(135deg,#00bcd4,#6c63ff);color:#fff}
 
@@ -1073,7 +1073,7 @@ function renderTxList() {
       <div class="tinf">
         <div class="tnm">${tx.subCategory || tx.majorCategory || (isTransfer?'Transfer':isCCPay?'CC Payment':'—')}</div>
         <div class="tsub">${sub}</div>
-        ${tx.notes ? `<div class="tsub" style="font-style:italic">${tx.notes}</div>` : ''}
+        ${tx.notes ? '<div class="tsub" style="font-style:italic">' + tx.notes + '</div>' : ''}
       </div>
       <div class="tamt ${cls}">${sign}₹${fmt(tx.amount)}</div>
     </div>`;
@@ -1099,8 +1099,8 @@ function renderBudGrid() {
         <div class="binum"><b class="${over?'cr':warn?'cy':''}">${use?'₹'+fmt(use):'₹0'}</b>${bud ? ' / ₹'+fmt(bud) : '<span style="color:var(--mt)"> No limit</span>'}</div>
       </div>
       ${bud ? `<div class="barbg"><div class="barf ${bc}" style="width:${pct}%"></div></div>` : ''}
-      ${over ? `<div class="balert ov">🚨 Over by ₹${fmt(use-bud)}</div>` : ''}
-      ${warn ? `<div class="balert wn">⚠️ ${Math.round(pct)}% used</div>` : ''}
+      ${over ? '<div class="balert ov">🚨 Over by ₹' + fmt(use-bud) + '</div>' : ''}
+      ${warn ? '<div class="balert wn">⚠️ ' + Math.round(pct) + '% used</div>' : ''}
     </div>`;
   }).join('') + '<div style="height:110px"></div>';
 }
@@ -2279,6 +2279,71 @@ function toggleAccDetail(id) {
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
+function accBalance(pm) {
+  let bal = parseFloat(pm.openBal) || 0;
+  S.transactions.forEach(t => {
+    if (t.paymentMode !== pm.name && t.paymentMode !== pm.id) return;
+    if (t.type === 'income')        bal += t.amount;
+    if (t.type === 'expense')       bal -= t.amount;
+    if (t.type === 'transfer-out')  bal -= t.amount;
+    if (t.type === 'transfer-in')   bal += t.amount;
+    if (t.type === 'cc-payment')    bal -= t.amount;
+  });
+  return bal;
+}
+
+function getCurrentCycle(billDay) {
+  const now   = new Date();
+  const today = now.getDate();
+  let cycleStart, cycleEnd;
+  if (today >= billDay) {
+    // we're inside the current cycle that started this month
+    cycleStart = new Date(now.getFullYear(), now.getMonth(), billDay);
+    cycleEnd   = new Date(now.getFullYear(), now.getMonth()+1, billDay-1);
+  } else {
+    // we're before billDay, so current cycle started last month
+    cycleStart = new Date(now.getFullYear(), now.getMonth()-1, billDay);
+    cycleEnd   = new Date(now.getFullYear(), now.getMonth(), billDay-1);
+  }
+  cycleEnd.setHours(23, 59, 59);
+  return { cycleStart, cycleEnd };
+}
+
+function getPrevCycle(billDay) {
+  const { cycleStart } = getCurrentCycle(billDay);
+  const prevEnd   = new Date(cycleStart); prevEnd.setDate(prevEnd.getDate()-1); prevEnd.setHours(23,59,59);
+  const prevStart = new Date(prevEnd.getFullYear(), prevEnd.getMonth(), billDay);
+  if (prevStart > prevEnd) prevStart.setMonth(prevStart.getMonth()-1);
+  return { prevStart, prevEnd };
+}
+
+function ccTxsInRange(pm, from, to) {
+  return S.transactions.filter(t => {
+    if (t.type !== 'expense') return false;
+    if (t.paymentMode !== pm.name && t.paymentMode !== pm.id) return false;
+    const d = new Date(t.date);
+    return d >= from && d <= to;
+  });
+}
+
+function ccPaymentsInRange(pm, from, to) {
+  return S.transactions.filter(t => {
+    // Accept transfer-in (payment received on CC) or cc-payment recorded directly on CC
+    if (t.type !== 'cc-payment' && t.type !== 'transfer-in') return false;
+    // Match by name or id — payment on CC account
+    if (t.paymentMode !== pm.name && t.paymentMode !== pm.id) return false;
+    const d = new Date(t.date);
+    return d >= from && d <= to;
+  }).reduce((a,t) => a+t.amount, 0);
+}
+
+function totalCCPaidEver(pm) {
+  return S.transactions.filter(t =>
+    (t.type === 'transfer-in' || t.type === 'cc-payment') &&
+    (t.paymentMode === pm.name || t.paymentMode === pm.id)
+  ).reduce((a,t) => a+t.amount, 0);
+}
+
 function renderAccounts() {
   const el = document.getElementById('accList');
   if (!S.payments.length) {
@@ -2288,78 +2353,6 @@ function renderAccounts() {
     return;
   }
 
-  // ── Compute running balance for non-CC accounts ──
-  function accBalance(pm) {
-    let bal = parseFloat(pm.openBal) || 0;
-    S.transactions.forEach(t => {
-      if (t.paymentMode !== pm.name && t.paymentMode !== pm.id) return;
-      if (t.type === 'income')        bal += t.amount;
-      if (t.type === 'expense')       bal -= t.amount;
-      if (t.type === 'transfer-out')  bal -= t.amount;
-      if (t.type === 'transfer-in')   bal += t.amount;
-      if (t.type === 'cc-payment')    bal -= t.amount;
-    });
-    return bal;
-  }
-
-  // ── CC billing cycle helpers ──
-  // Given billDay (e.g. 1), find the current billing cycle's start & end
-  function getCurrentCycle(billDay) {
-    const now   = new Date();
-    const today = now.getDate();
-    let cycleStart, cycleEnd;
-    if (today >= billDay) {
-      // we're inside the current cycle that started this month
-      cycleStart = new Date(now.getFullYear(), now.getMonth(), billDay);
-      cycleEnd   = new Date(now.getFullYear(), now.getMonth()+1, billDay-1);
-    } else {
-      // we're before billDay, so current cycle started last month
-      cycleStart = new Date(now.getFullYear(), now.getMonth()-1, billDay);
-      cycleEnd   = new Date(now.getFullYear(), now.getMonth(), billDay-1);
-    }
-    cycleEnd.setHours(23, 59, 59);
-    return { cycleStart, cycleEnd };
-  }
-
-  // Previous billing cycle (last bill that was/will be generated)
-  function getPrevCycle(billDay) {
-    const { cycleStart } = getCurrentCycle(billDay);
-    const prevEnd   = new Date(cycleStart); prevEnd.setDate(prevEnd.getDate()-1); prevEnd.setHours(23,59,59);
-    const prevStart = new Date(prevEnd.getFullYear(), prevEnd.getMonth(), billDay);
-    if (prevStart > prevEnd) prevStart.setMonth(prevStart.getMonth()-1);
-    return { prevStart, prevEnd };
-  }
-
-  // Transactions on a CC in a given date range
-  function ccTxsInRange(pm, from, to) {
-    return S.transactions.filter(t => {
-      if (t.type !== 'expense') return false;
-      if (t.paymentMode !== pm.name && t.paymentMode !== pm.id) return false;
-      const d = new Date(t.date);
-      return d >= from && d <= to;
-    });
-  }
-
-  // CC payments received in a range
-  function ccPaymentsInRange(pm, from, to) {
-    return S.transactions.filter(t => {
-      // Accept transfer-in (payment received on CC) or cc-payment recorded directly on CC
-      if (t.type !== 'cc-payment' && t.type !== 'transfer-in') return false;
-      // Match by name or id — payment on CC account
-      if (t.paymentMode !== pm.name && t.paymentMode !== pm.id) return false;
-      const d = new Date(t.date);
-      return d >= from && d <= to;
-    }).reduce((a,t) => a+t.amount, 0);
-  }
-
-  // Also compute total ever paid on CC (for carrying forward multi-cycle)
-  function totalCCPaidEver(pm) {
-    return S.transactions.filter(t =>
-      (t.type === 'transfer-in' || t.type === 'cc-payment') &&
-      (t.paymentMode === pm.name || t.paymentMode === pm.id)
-    ).reduce((a,t) => a+t.amount, 0);
-  }
-
   const now = new Date();
 
   // Totals for summary card
@@ -2367,42 +2360,46 @@ function renderAccounts() {
   const ccCards   = S.payments.filter(p => p.accType === 'cc');
   const totalLiq  = liquid.reduce((a,p) => a + accBalance(p), 0);
 
-  // CC total due = total ever spent - total ever paid (true outstanding balance)
+  // CC due = per cycle matching:
+  // Prev cycle bill payment window = prevEnd → currentCycleEnd (due date period)
+  // Current cycle has NO payment yet (cycle still running)
   let totalCurCycle = 0, totalPrevUnpaid = 0;
   ccCards.forEach(pm => {
     const billDay = parseInt(pm.ccBillDay) || 1;
     const { cycleStart, cycleEnd } = getCurrentCycle(billDay);
-    // Current cycle spend
-    const curSpent   = ccTxsInRange(pm, cycleStart, cycleEnd).reduce((s,t)=>s+t.amount,0);
-    totalCurCycle   += curSpent;
-    // True previous outstanding = all historical spend before this cycle - all payments ever made
-    const allSpend   = S.transactions.filter(t =>
-      t.type==='expense' && (t.paymentMode===pm.name||t.paymentMode===pm.id) &&
-      new Date(t.date) < cycleStart
-    ).reduce((a,t)=>a+t.amount,0);
-    const allPaid    = totalCCPaidEver(pm);
-    const prevUnpaid = Math.max(0, allSpend - allPaid);
-    totalPrevUnpaid += prevUnpaid;
+    const { prevStart, prevEnd }   = getPrevCycle(billDay);
+
+    // Current cycle spend (running, no payment expected yet)
+    const curSpent  = ccTxsInRange(pm, cycleStart, now).reduce((s,t)=>s+t.amount,0);
+    totalCurCycle  += curSpent;
+
+    // Prev cycle: payments made in the window BETWEEN prev cycle end and current cycle end
+    // (this is the payment due window for the prev bill)
+    const prevSpent   = ccTxsInRange(pm, prevStart, prevEnd).reduce((s,t)=>s+t.amount,0);
+    const prevPaidAmt = ccPaymentsInRange(pm, prevEnd, cycleEnd);
+    const prevUnpaid  = Math.max(0, prevSpent - prevPaidAmt);
+    totalPrevUnpaid  += prevUnpaid;
   });
   const totalCCDue  = totalCurCycle + totalPrevUnpaid;
   const totalLimit  = ccCards.reduce((a,p) => a+(parseFloat(p.ccLimit)||0), 0);
 
-  // ── Summary card ──
-  let html = `<div class="acc-total-card">
-    <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.4px;color:var(--mt)">Net Worth Snapshot</div>
-    <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;margin:6px 0;letter-spacing:-1px;color:${totalLiq-totalCCDue>=0?'var(--gn)':'var(--ac2)'}">
-      ₹${fmt(totalLiq - totalCCDue)}
-    </div>
-    <div class="acc-total-row">
-      <div class="acc-total-cell"><div class="acc-total-cell-lbl">Liquid</div><div class="acc-total-cell-val cg">₹${fmt(totalLiq)}</div></div>
-      <div class="acc-total-cell">
-        <div class="acc-total-cell-lbl">CC Due</div>
-        <div class="acc-total-cell-val cr">₹${fmt(totalCCDue)}</div>
-        ${totalPrevUnpaid>0?`<div style="font-size:9px;color:var(--yw);margin-top:2px">incl. ₹${fmt(totalPrevUnpaid)} prev unpaid</div>`:''}
-      </div>
-      <div class="acc-total-cell"><div class="acc-total-cell-lbl">CC Limit</div><div class="acc-total-cell-val cy">₹${fmt(totalLimit)}</div></div>
-    </div>
-  </div>`;
+  // ── Summary card — no nested backticks (Safari safe) ──
+  const netWorth = totalLiq - totalCCDue;
+  const nwColor  = netWorth >= 0 ? '#a5d6a7' : '#ff5252';
+  const prevLabel = totalPrevUnpaid > 0 ? ' (Unpaid)' : '';
+  let html = '<div class="acc-total-card">'
+    + '<div style="font-size:11px;text-transform:uppercase;letter-spacing:1.4px;color:var(--mt);margin-bottom:8px">Net Worth Snapshot</div>'
+    + '<div class="acc-total-row">'
+      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Net Worth</div><div class="acc-total-cell-val" style="color:' + nwColor + '">₹' + fmt(netWorth) + '</div></div>'
+      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Liquid</div><div class="acc-total-cell-val cg">₹' + fmt(totalLiq) + '</div></div>'
+      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Total CC Due</div><div class="acc-total-cell-val cr">₹' + fmt(totalCCDue) + '</div></div>'
+    + '</div>'
+    + '<div class="acc-total-row" style="margin-top:8px">'
+      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Cur Cycle CC</div><div class="acc-total-cell-val" style="color:#ff8a80">₹' + fmt(totalCurCycle) + '</div></div>'
+      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Prev Bill Due' + prevLabel + '</div><div class="acc-total-cell-val" style="color:' + (totalPrevUnpaid > 0 ? '#ff5252' : '#a5d6a7') + '">₹' + fmt(totalPrevUnpaid) + '</div></div>'
+      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">CC Limit</div><div class="acc-total-cell-val cy">₹' + fmt(totalLimit) + '</div></div>'
+    + '</div>'
+  + '</div>';
 
   const typeGrad  = { bank:'linear-gradient(135deg,#1a237e,#0d47a1)', cc:'linear-gradient(135deg,#4a0e0e,#b71c1c)', cash:'linear-gradient(135deg,#1b5e20,#2e7d32)', wallet:'linear-gradient(135deg,#4a148c,#7b1fa2)' };
   const typeLabel = { bank:'Bank Account', cc:'Credit Card', cash:'Cash', wallet:'Wallet / UPI' };
@@ -2450,16 +2447,18 @@ function renderAccounts() {
     const { cycleStart, cycleEnd } = getCurrentCycle(billDay);
     const curTxs   = ccTxsInRange(pm, cycleStart, cycleEnd);
     const curSpent = curTxs.reduce((a,t) => a+t.amount, 0);
-    const avail    = limit > 0 ? limit - curSpent : null;
-    const usePct   = limit > 0 ? Math.min((curSpent/limit)*100, 100) : 0;
 
-    // Previous cycle (last bill)
+    // Previous cycle (last bill) — must be calculated BEFORE totalOutstanding
     const { prevStart, prevEnd } = getPrevCycle(billDay);
     const prevTxs    = ccTxsInRange(pm, prevStart, prevEnd);
     const prevSpent  = prevTxs.reduce((a,t) => a+t.amount, 0);
-    const payFrom2   = new Date(prevEnd); payFrom2.setDate(payFrom2.getDate() - 30);
-    const prevPaid   = ccPaymentsInRange(pm, payFrom2, now);
-    const prevBalance= prevSpent - prevPaid;
+    const prevPaid   = ccPaymentsInRange(pm, prevEnd, cycleEnd);
+    const prevBalance= Math.max(0, prevSpent - prevPaid);
+
+    // Total outstanding = current cycle + unpaid prev bill
+    const totalOutstanding = curSpent + prevBalance;
+    const avail    = limit > 0 ? limit - totalOutstanding : null;
+    const usePct   = limit > 0 ? Math.min((totalOutstanding/limit)*100, 100) : 0;
 
     // Due date calculation
     let dueStr = '', dueClass = '', daysLeft = null;
@@ -2492,65 +2491,68 @@ function renderAccounts() {
     const cardId = 'cc_'+pm.id;
     const isOpen = typeof window !== 'undefined' && document.getElementById(cardId+'_txns')?.classList.contains('open') || false;
 
-    html += `<div class="acc-card" style="background:${typeGrad.cc};padding:0;overflow:hidden">
-      <div style="padding:16px 18px">
-        <div class="acc-top">
-          <div class="acc-ico">${pm.icon||'💳'}</div>
-          <div class="acc-info">
-            <div class="acc-nm">${pm.name}</div>
-            <div class="acc-type">Credit Card${limit?' · Limit ₹'+fmt(limit):''}</div>
-          </div>
-        </div>
+    // Build CC card using string concatenation — NO nested backticks (Safari safe)
+    const ccBarHtml    = limit > 0
+      ? '<div class="acc-cc-bar" style="margin:8px 0"><div class="acc-cc-fill" style="width:' + usePct + '%"></div></div>'
+      : '';
+    const availHtml    = avail !== null
+      ? '<div class="acc-stat"><div class="acc-stat-lbl">Available Credit</div><div class="acc-stat-val" style="color:#a5d6a7">₹' + fmt(avail) + '</div></div>'
+      : '';
+    const dueHtml      = dueStr
+      ? '<div class="acc-due ' + dueClass + '" style="margin-top:8px">📅 Due ' + dueStr + (daysLeft !== null ? ' · <b>' + daysLeft + ' days left</b>' : '') + (daysLeft !== null && daysLeft <= 5 ? ' 🚨' : '') + '</div>'
+      : '';
+    const prevBillHtml = prevSpent > 0
+      ? '<div style="background:rgba(0,0,0,.25);border-radius:10px;padding:10px 12px;margin-top:10px">'
+        + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,.5);margin-bottom:6px">Last Bill (' + fmtDate(prevStart) + ' – ' + fmtDate(prevEnd) + ')</div>'
+        + '<div style="display:flex;justify-content:space-between;align-items:center">'
+          + '<div>'
+            + '<div style="font-size:11px;color:rgba(255,255,255,.6)">Total: <b style="color:#ff8a80">₹' + fmt(prevSpent) + '</b></div>'
+            + '<div style="font-size:11px;color:rgba(255,255,255,.6)">Paid: <b style="color:#a5d6a7">₹' + fmt(prevPaid) + '</b></div>'
+          + '</div>'
+          + '<div style="text-align:right">'
+            + '<div style="font-family:Syne,sans-serif;font-size:16px;font-weight:800;color:' + (prevBalance <= 0 ? '#a5d6a7' : '#ff8a80') + '">'
+              + (prevBalance <= 0 ? '✅ Cleared' : '₹' + fmt(prevBalance) + ' due')
+            + '</div>'
+          + '</div>'
+        + '</div>'
+      + '</div>'
+      : '';
+    const noTxMsg = '<div style="padding:12px 14px;font-size:12px;color:rgba(255,255,255,.4)">No transactions this cycle</div>';
 
-        <div style="font-size:9px;text-transform:uppercase;letter-spacing:1.2px;color:rgba(255,255,255,.5);margin-bottom:3px">
-          Current Cycle Outstanding
-        </div>
-        <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:#ff8a80">₹${fmt(curSpent)}</div>
-        ${limit>0?`<div class="acc-cc-bar" style="margin:8px 0"><div class="acc-cc-fill" style="width:${usePct}%"></div></div>`:''}
-
-        <div class="acc-row">
-          <div class="acc-stat">
-            <div class="acc-stat-lbl">Billing Cycle</div>
-            <div style="font-size:11px;font-weight:600;margin-top:2px">${cycleStr}</div>
-          </div>
-          ${avail!==null?`<div class="acc-stat">
-            <div class="acc-stat-lbl">Available Credit</div>
-            <div class="acc-stat-val" style="color:#a5d6a7">₹${fmt(avail)}</div>
-          </div>`:''}
-        </div>
-
-        ${dueStr?`<div class="acc-due ${dueClass}" style="margin-top:8px">
-          📅 Due ${dueStr}${daysLeft!==null?' · <b>'+daysLeft+' days left</b>':''}
-          ${daysLeft!==null&&daysLeft<=5?' 🚨':''}
-        </div>`:''}
-
-        ${prevSpent>0?`<div style="background:rgba(0,0,0,.25);border-radius:10px;padding:10px 12px;margin-top:10px">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,.5);margin-bottom:6px">
-            Last Bill (${fmtDate(prevStart)} – ${fmtDate(prevEnd)})
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div style="font-size:11px;color:rgba(255,255,255,.6)">Total: <b style="color:#ff8a80">₹${fmt(prevSpent)}</b></div>
-              <div style="font-size:11px;color:rgba(255,255,255,.6)">Paid: <b style="color:#a5d6a7">₹${fmt(prevPaid)}</b></div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:800;color:${prevBalance<=0?'#a5d6a7':'#ff8a80'}">
-                ${prevBalance<=0?'✅ Cleared':'₹'+fmt(prevBalance)+' due'}
-              </div>
-            </div>
-          </div>
-        </div>`:''}
-
-        <button onclick="toggleCCTxns('${pm.id}')"
-          style="width:100%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:9px;margin-top:10px;font-size:12px;color:rgba(255,255,255,.8);cursor:pointer;font-family:'Syne',sans-serif;font-weight:600">
-          ${curTxs.length} transaction${curTxs.length!==1?'s':''} this cycle ▼
-        </button>
-      </div>
-
-      <div id="${cardId}_txns" style="display:none;border-top:1px solid rgba(255,255,255,.1)">
-        ${txRows||'<div style="padding:12px 14px;font-size:12px;color:rgba(255,255,255,.4)">No transactions this cycle</div>'}
-      </div>
-    </div>`;
+    html += '<div class="acc-card" style="background:' + typeGrad.cc + ';padding:0;overflow:hidden">'
+      + '<div style="padding:16px 18px">'
+        + '<div class="acc-top">'
+          + '<div class="acc-ico">' + (pm.icon || '💳') + '</div>'
+          + '<div class="acc-info">'
+            + '<div class="acc-nm">' + pm.name + '</div>'
+            + '<div class="acc-type">Credit Card' + (limit ? ' · Limit ₹' + fmt(limit) : '') + '</div>'
+          + '</div>'
+        + '</div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+          + '<div>'
+            + '<div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,.5);margin-bottom:3px">Current Cycle</div>'
+            + '<div style="font-family:Syne,sans-serif;font-size:20px;font-weight:800;color:#ff8a80">₹' + fmt(curSpent) + '</div>'
+          + '</div>'
+          + '<div>'
+            + '<div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,.5);margin-bottom:3px">Total Outstanding</div>'
+            + '<div style="font-family:Syne,sans-serif;font-size:20px;font-weight:800;color:' + (totalOutstanding > 0 ? '#ff5252' : '#a5d6a7') + '">₹' + fmt(totalOutstanding) + '</div>'
+          + '</div>'
+        + '</div>'
+        + ccBarHtml
+        + '<div class="acc-row">'
+          + '<div class="acc-stat"><div class="acc-stat-lbl">Billing Cycle</div><div style="font-size:11px;font-weight:600;margin-top:2px">' + cycleStr + '</div></div>'
+          + availHtml
+        + '</div>'
+        + dueHtml
+        + prevBillHtml
+        + '<button onclick="toggleCCTxns(\'' + pm.id + '\')" style="width:100%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:9px;margin-top:10px;font-size:12px;color:rgba(255,255,255,.8);cursor:pointer;font-family:Syne,sans-serif;font-weight:600">'
+          + curTxs.length + ' transaction' + (curTxs.length !== 1 ? 's' : '') + ' this cycle ▼'
+        + '</button>'
+      + '</div>'
+      + '<div id="' + cardId + '_txns" style="display:none;border-top:1px solid rgba(255,255,255,.1)">'
+        + (txRows || noTxMsg)
+      + '</div>'
+    + '</div>';
   });
 
   el.innerHTML = html;
