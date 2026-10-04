@@ -2386,18 +2386,23 @@ function renderAccounts() {
   // ── Summary card — no nested backticks (Safari safe) ──
   const netWorth = totalLiq - totalCCDue;
   const nwColor  = netWorth >= 0 ? '#a5d6a7' : '#ff5252';
-  const prevLabel = totalPrevUnpaid > 0 ? ' (Unpaid)' : '';
+  const prevLabel = totalPrevUnpaid > 0 ? ' (Unpaid)' : ' (Cleared)';
   let html = '<div class="acc-total-card">'
-    + '<div style="font-size:11px;text-transform:uppercase;letter-spacing:1.4px;color:var(--mt);margin-bottom:8px">Net Worth Snapshot</div>'
-    + '<div class="acc-total-row">'
-      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Net Worth</div><div class="acc-total-cell-val" style="color:' + nwColor + '">₹' + fmt(netWorth) + '</div></div>'
-      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Liquid</div><div class="acc-total-cell-val cg">₹' + fmt(totalLiq) + '</div></div>'
+    + '<div style="font-size:11px;text-transform:uppercase;letter-spacing:1.4px;color:var(--mt);margin-bottom:10px">Net Worth Snapshot</div>'
+    // Row 1 — Net Worth (full width)
+    + '<div style="background:rgba(255,255,255,.05);border-radius:10px;padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">'
+      + '<div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--mt)">Net Worth</div>'
+      + '<div style="font-family:Syne,sans-serif;font-size:20px;font-weight:800;color:' + nwColor + '">₹' + fmt(netWorth) + '</div>'
+    + '</div>'
+    // Row 2 — Liquid | Total CC Due
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
+      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Liquid Balance</div><div class="acc-total-cell-val cg">₹' + fmt(totalLiq) + '</div></div>'
       + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Total CC Due</div><div class="acc-total-cell-val cr">₹' + fmt(totalCCDue) + '</div></div>'
     + '</div>'
-    + '<div class="acc-total-row" style="margin-top:8px">'
-      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Cur Cycle CC</div><div class="acc-total-cell-val" style="color:#ff8a80">₹' + fmt(totalCurCycle) + '</div></div>'
-      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Prev Bill Due' + prevLabel + '</div><div class="acc-total-cell-val" style="color:' + (totalPrevUnpaid > 0 ? '#ff5252' : '#a5d6a7') + '">₹' + fmt(totalPrevUnpaid) + '</div></div>'
-      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">CC Limit</div><div class="acc-total-cell-val cy">₹' + fmt(totalLimit) + '</div></div>'
+    // Row 3 — Current Cycle CC | Prev Bill Due
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Current Cycle CC</div><div class="acc-total-cell-val" style="color:#ff8a80">₹' + fmt(totalCurCycle) + '</div></div>'
+      + '<div class="acc-total-cell"><div class="acc-total-cell-lbl">Prev Bill' + prevLabel + '</div><div class="acc-total-cell-val" style="color:' + (totalPrevUnpaid > 0 ? '#ff5252' : '#a5d6a7') + '">₹' + fmt(totalPrevUnpaid) + '</div></div>'
     + '</div>'
   + '</div>';
 
